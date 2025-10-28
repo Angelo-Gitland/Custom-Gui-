@@ -1,0 +1,593 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Create ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CustomGUI"
+screenGui.Parent = player.PlayerGui
+screenGui.ResetOnSpawn = false
+
+-- Create Frame (Movable Window) - Taller for 16 buttons
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 300, 0, 750)
+frame.Position = UDim2.new(0.5, -150, 0.5, -375)
+frame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+frame.BorderSizePixel = 2
+frame.Active = true
+frame.Draggable = true
+frame.Parent = screenGui
+
+-- Create Title Bar
+local titleBar = Instance.new("TextLabel")
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.Position = UDim2.new(0, 0, 0, 0)
+titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+titleBar.Text = "Custom GUI"
+titleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleBar.TextScaled = true
+titleBar.TextSize = 24
+titleBar.Parent = frame
+
+-- Function to create buttons
+local function createButton(name, yPos, callback)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(0.9, 0, 0, 40)
+	button.Position = UDim2.new(0.05, 0, 0, yPos)
+	button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+	button.Text = name
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextScaled = true
+	button.TextSize = 20
+	button.Parent = frame
+	button.MouseButton1Click:Connect(callback)
+	return button
+end
+
+-- Variables for toggles
+local infJumpEnabled = false
+local flyEnabled = false
+local noclipEnabled = false
+local superSpeedEnabled = false
+local flingTouchEnabled = false
+local spinFastEnabled = false
+local reallyFastSpinEnabled = false
+local orbitEnabled = false
+local orbitTarget = nil
+local flySpeed = 50
+local superSpeedValue = 50
+local teleportDistance = 50 -- Distance for Teleport Forward (in studs)
+local teleportAreaSize = 500 -- Size of random teleport area (in studs)
+local flingCooldowns = {} -- Table for fling touch cooldowns
+local spinSpeed = 20 -- Radians per second for Spin Fast
+local reallyFastSpinSpeed = 50 -- Radians per second for Really Fast Spin
+local orbitRadius = 10 -- Distance from target in studs
+local orbitSpeed = 2 -- Angular speed in radians per second
+local orbitAngle = 0 -- Current angle for orbiting
+
+-- Infinite Jump
+local function onInfJump()
+	infJumpEnabled = not infJumpEnabled
+	local button = frame:FindFirstChild("Inf Jump")
+	if button then
+		button.BackgroundColor3 = infJumpEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+end
+
+UserInputService.JumpRequest:Connect(function()
+	if infJumpEnabled and character and humanoid then
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	end
+end)
+
+-- Fly (Basic Fly Script)
+local function onFly()
+	flyEnabled = not flyEnabled
+	local button = frame:FindFirstChild("Fly")
+	if button then
+		button.BackgroundColor3 = flyEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	
+	if flyEnabled then
+		local bodyVelocity = Instance.new("BodyVelocity")
+		bodyVelocity.Name = "FlyVelocity"
+		bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+		bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+		bodyVelocity.Parent = rootPart
+		
+		local bodyGyro = Instance.new("BodyGyro")
+		bodyGyro.Name = "FlyGyro"
+		bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+		bodyGyro.CFrame = rootPart.CFrame
+		bodyGyro.Parent = rootPart
+		
+		RunService:BindToRenderStep("Fly", Enum.RenderPriority.Input.Value, function()
+			if not flyEnabled then return end
+			local cam = workspace.CurrentCamera
+			local moveDirection = Vector3.new()
+			if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+				moveDirection = moveDirection + cam.CFrame.LookVector
+			end
+			if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+				moveDirection = moveDirection - cam.CFrame.LookVector
+			end
+			if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+				moveDirection = moveDirection - cam.CFrame.RightVector
+			end
+			if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+				moveDirection = moveDirection + cam.CFrame.RightVector
+			end
+			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+				moveDirection = moveDirection + Vector3.new(0, 1, 0)
+			end
+			if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+				moveDirection = moveDirection - Vector3.new(0, 1, 0)
+			end
+			bodyVelocity.Velocity = moveDirection * flySpeed
+			bodyGyro.CFrame = cam.CFrame
+		end)
+	else
+		if rootPart:FindFirstChild("FlyVelocity") then
+			rootPart.FlyVelocity:Destroy()
+		end
+		if rootPart:FindFirstChild("FlyGyro") then
+			rootPart.FlyGyro:Destroy()
+		end
+		RunService:UnbindFromRenderStep("Fly")
+	end
+end
+
+-- Fling Self
+local function onFlingSelf()
+	if character and rootPart then
+		local flingForce = Vector3.new(math.random(-5000, 5000), 5000, math.random(-5000, 5000))
+		local bodyVelocity = Instance.new("BodyVelocity")
+		bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+		bodyVelocity.Velocity = flingForce
+		bodyVelocity.Parent = rootPart
+		task.wait(0.1)
+		bodyVelocity:Destroy()
+	end
+end
+
+-- Super Speed
+local function onSuperSpeed()
+	superSpeedEnabled = not superSpeedEnabled
+	local button = frame:FindFirstChild("SuperSpeed")
+	if button then
+		button.BackgroundColor3 = superSpeedEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	if humanoid then
+		humanoid.WalkSpeed = superSpeedEnabled and superSpeedValue or 16
+	end
+end
+
+-- Dance Animation
+local function onDance()
+	if character and humanoid then
+		local danceAnimation = Instance.new("Animation")
+		danceAnimation.AnimationId = "rbxassetid://507771019" -- Default Roblox dance animation
+		local track = humanoid:LoadAnimation(danceAnimation)
+		track:Play()
+	end
+end
+
+-- Kill Self
+local function onKillSelf()
+	if humanoid then
+		humanoid.Health = 0
+	end
+end
+
+-- Noclip
+local function onNoclip()
+	noclipEnabled = not noclipEnabled
+	local button = frame:FindFirstChild("Noclip")
+	if button then
+		button.BackgroundColor3 = noclipEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	
+	if noclipEnabled then
+		RunService:BindToRenderStep("Noclip", Enum.RenderPriority.Character.Value, function()
+			if character then
+				for _, part in pairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = not noclipEnabled
+					end
+				end
+			end
+		end)
+	else
+		if character then
+			for _, part in pairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = true
+				end
+			end
+		end
+		RunService:UnbindFromRenderStep("Noclip")
+	end
+end
+
+-- Sky Changer
+local function onSkyChanger()
+	local lighting = game:GetService("Lighting")
+	if lighting:FindFirstChildOfClass("Sky") then
+		lighting.Sky:Destroy()
+	end
+	local newSky = Instance.new("Sky")
+	newSky.SkyboxBk = "rbxassetid://600830446" -- Example skybox asset
+	newSky.SkyboxDn = "rbxassetid://600831635"
+	newSky.SkyboxFt = "rbxassetid://600832720"
+	newSky.SkyboxLf = "rbxassetid://600833862"
+	newSky.SkyboxRt = "rbxassetid://600835007"
+	newSky.SkyboxUp = "rbxassetid://600836281"
+	newSky.Parent = lighting
+end
+
+-- Trip Self
+local function onTripSelf()
+	if character and humanoid then
+		humanoid:ChangeState(Enum.HumanoidStateType.FallingDown)
+		task.wait(1) -- Brief ragdoll duration
+		if humanoid then
+			humanoid:ChangeState(Enum.HumanoidStateType.Running)
+		end
+	end
+end
+
+-- Teleport Forward
+local function onTeleportForward()
+	if character and rootPart then
+		local forwardVector = rootPart.CFrame.LookVector
+		local currentPosition = rootPart.Position
+		local newPosition = currentPosition + forwardVector * teleportDistance
+		rootPart.CFrame = CFrame.new(newPosition, newPosition + forwardVector)
+	end
+end
+
+-- Teleport Random
+local function onTeleportRandom()
+	if character and rootPart then
+		local currentY = rootPart.Position.Y -- Maintain current height
+		local randomX = math.random(-teleportAreaSize / 2, teleportAreaSize / 2)
+		local randomZ = math.random(-teleportAreaSize / 2, teleportAreaSize / 2)
+		local newPosition = Vector3.new(randomX, currentY, randomZ)
+		local forwardVector = rootPart.CFrame.LookVector
+		rootPart.CFrame = CFrame.new(newPosition, newPosition + forwardVector)
+	end
+end
+
+-- Server Hop
+local function onServerHop()
+	StarterGui:SetCore("SendNotification", {
+		Title = "Server Hop";
+		Text = "Fetching servers...";
+		Duration = 3;
+	})
+	
+	local success, servers = pcall(function()
+		return HttpService:JSONDecode(HttpService:GetAsync("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"))
+	end)
+	
+	if not success or not servers or not servers.data then
+		StarterGui:SetCore("SendNotification", {
+			Title = "Server Hop Failed";
+			Text = "No servers found or API error.";
+			Duration = 5;
+		})
+		return
+	end
+	
+	local availableServers = {}
+	for _, server in pairs(servers.data) do
+		if server.playing < server.maxPlayers then
+			table.insert(availableServers, server.id)
+		end
+	end
+	
+	if #availableServers == 0 then
+		StarterGui:SetCore("SendNotification", {
+			Title = "Server Hop Failed";
+			Text = "No available servers.";
+			Duration = 5;
+		})
+		return
+	end
+	
+	local randomServerId = availableServers[math.random(1, #availableServers)]
+	
+	StarterGui:SetCore("SendNotification", {
+		Title = "Server Hop";
+		Text = "Teleporting to server " .. randomServerId .. "...";
+		Duration = 3;
+	})
+	
+	TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServerId, player)
+end
+
+-- Fling Touch
+local function onFlingTouch()
+	flingTouchEnabled = not flingTouchEnabled
+	local button = frame:FindFirstChild("Fling Touch")
+	if button then
+		button.BackgroundColor3 = flingTouchEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	
+	if flingTouchEnabled then
+		for _, part in pairs(character:GetChildren()) do
+			if part:IsA("BasePart") then
+				part.Touched:Connect(function(hit)
+					if not flingTouchEnabled then return end
+					local targetPlayer = Players:GetPlayerFromCharacter(hit.Parent)
+					if targetPlayer and targetPlayer ~= player then
+						local targetRoot = hit.Parent:FindFirstChild("HumanoidRootPart")
+						if targetRoot then
+							local lastFling = flingCooldowns[targetPlayer.UserId] or 0
+							if os.clock() - lastFling >= 1 then
+								local flingForce = Vector3.new(math.random(-5000, 5000), 5000, math.random(-5000, 5000))
+								local bodyVelocity = Instance.new("BodyVelocity")
+								bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+								bodyVelocity.Velocity = flingForce
+								bodyVelocity.Parent = targetRoot
+								task.wait(0.1)
+								bodyVelocity:Destroy()
+								flingCooldowns[targetPlayer.UserId] = os.clock()
+							end
+						end
+					end
+				end)
+			end
+		end
+	else
+		flingCooldowns = {} -- Clear cooldowns when disabled
+	end
+end
+
+-- Spin Fast
+local function onSpinFast()
+	spinFastEnabled = not spinFastEnabled
+	local button = frame:FindFirstChild("Spin Fast")
+	if button then
+		button.BackgroundColor3 = spinFastEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	
+	-- Disable Really Fast Spin and Orbit Player if active
+	if spinFastEnabled then
+		if reallyFastSpinEnabled then
+			reallyFastSpinEnabled = false
+			local reallyFastButton = frame:FindFirstChild("Really Fast Spin")
+			if reallyFastButton then
+				reallyFastButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			end
+			if rootPart:FindFirstChild("SpinVelocity") then
+				rootPart.SpinVelocity:Destroy()
+			end
+		end
+		if orbitEnabled then
+			orbitEnabled = false
+			local orbitButton = frame:FindFirstChild("Orbit Player")
+			if orbitButton then
+				orbitButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			end
+			orbitTarget = nil
+			RunService:UnbindFromRenderStep("Orbit")
+		end
+	end
+	
+	if spinFastEnabled then
+		local bodyAngularVelocity = Instance.new("BodyAngularVelocity")
+		bodyAngularVelocity.Name = "SpinVelocity"
+		bodyAngularVelocity.MaxTorque = Vector3.new(0, math.huge, 0) -- Spin on Y-axis
+		bodyAngularVelocity.AngularVelocity = Vector3.new(0, spinSpeed, 0)
+		bodyAngularVelocity.Parent = rootPart
+	else
+		if rootPart:FindFirstChild("SpinVelocity") then
+			rootPart.SpinVelocity:Destroy()
+		end
+	end
+end
+
+-- Really Fast Spin
+local function onReallyFastSpin()
+	reallyFastSpinEnabled = not reallyFastSpinEnabled
+	local button = frame:FindFirstChild("Really Fast Spin")
+	if button then
+		button.BackgroundColor3 = reallyFastSpinEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	
+	-- Disable Spin Fast and Orbit Player if active
+	if reallyFastSpinEnabled then
+		if spinFastEnabled then
+			spinFastEnabled = false
+			local fastButton = frame:FindFirstChild("Spin Fast")
+			if fastButton then
+				fastButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			end
+			if rootPart:FindFirstChild("SpinVelocity") then
+				rootPart.SpinVelocity:Destroy()
+			end
+		end
+		if orbitEnabled then
+			orbitEnabled = false
+			local orbitButton = frame:FindFirstChild("Orbit Player")
+			if orbitButton then
+				orbitButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			end
+			orbitTarget = nil
+			RunService:UnbindFromRenderStep("Orbit")
+		end
+	end
+	
+	if reallyFastSpinEnabled then
+		local bodyAngularVelocity = Instance.new("BodyAngularVelocity")
+		bodyAngularVelocity.Name = "SpinVelocity"
+		bodyAngularVelocity.MaxTorque = Vector3.new(0, math.huge, 0) -- Spin on Y-axis
+		bodyAngularVelocity.AngularVelocity = Vector3.new(0, reallyFastSpinSpeed, 0)
+		bodyAngularVelocity.Parent = rootPart
+	else
+		if rootPart:FindFirstChild("SpinVelocity") then
+			rootPart.SpinVelocity:Destroy()
+		end
+	end
+end
+
+-- Orbit Player
+local function onOrbitPlayer()
+	orbitEnabled = not orbitEnabled
+	local button = frame:FindFirstChild("Orbit Player")
+	if button then
+		button.BackgroundColor3 = orbitEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(100, 100, 100)
+	end
+	
+	if orbitEnabled then
+		-- Disable Spin Fast and Really Fast Spin if active
+		if spinFastEnabled then
+			spinFastEnabled = false
+			local fastButton = frame:FindFirstChild("Spin Fast")
+			if fastButton then
+				fastButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			end
+			if rootPart:FindFirstChild("SpinVelocity") then
+				rootPart.SpinVelocity:Destroy()
+			end
+		end
+		if reallyFastSpinEnabled then
+			reallyFastSpinEnabled = false
+			local reallyFastButton = frame:FindFirstChild("Really Fast Spin")
+			if reallyFastButton then
+				reallyFastButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+			end
+			if rootPart:FindFirstChild("SpinVelocity") then
+				rootPart.SpinVelocity:Destroy()
+			end
+		end
+		
+		-- Prompt to select a player
+		StarterGui:SetCore("SendNotification", {
+			Title = "Orbit Player";
+			Text = "Click on a player to orbit them.";
+			Duration = 5;
+		})
+		
+		local mouseConnection
+		mouseConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed and orbitEnabled then
+				local mouse = player:GetMouse()
+				local hit = mouse.Hit
+				local target = Players:GetPlayerFromCharacter(mouse.Target and mouse.Target.Parent)
+				if target and target ~= player and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+					orbitTarget = target
+					StarterGui:SetCore("SendNotification", {
+						Title = "Orbit Player";
+						Text = "Orbiting " .. target.Name .. ".";
+						Duration = 3;
+					})
+					
+					-- Start orbiting
+					RunService:BindToRenderStep("Orbit", Enum.RenderPriority.Character.Value + 1, function(dt)
+						if not orbitEnabled or not orbitTarget or not orbitTarget.Character or not orbitTarget.Character:FindFirstChild("HumanoidRootPart") then
+							orbitEnabled = false
+							orbitTarget = nil
+							button.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+							RunService:UnbindFromRenderStep("Orbit")
+							StarterGui:SetCore("SendNotification", {
+								Title = "Orbit Player";
+								Text = "Orbit stopped: Target lost or disabled.";
+								Duration = 5;
+							})
+							return
+						end
+						local targetRoot = orbitTarget.Character.HumanoidRootPart
+						orbitAngle = orbitAngle + orbitSpeed * dt
+						local offset = Vector3.new(math.cos(orbitAngle) * orbitRadius, 0, math.sin(orbitAngle) * orbitRadius)
+						local newPosition = targetRoot.Position + offset
+						rootPart.CFrame = CFrame.new(newPosition, targetRoot.Position)
+					end)
+					mouseConnection:Disconnect()
+				else
+					StarterGui:SetCore("SendNotification", {
+						Title = "Orbit Player";
+						Text = "Invalid target. Click on a player.";
+						Duration = 5;
+					})
+				end
+			end
+		end)
+	else
+		orbitTarget = nil
+		RunService:UnbindFromRenderStep("Orbit")
+	end
+end
+
+-- Create Buttons (Adjusted Y positions for 16 buttons)
+createButton("Inf Jump", 50, onInfJump)
+createButton("Fly", 95, onFly)
+createButton("Fling Self", 140, onFlingSelf)
+createButton("SuperSpeed", 185, onSuperSpeed)
+createButton("Dance", 230, onDance)
+createButton("Kill Self", 275, onKillSelf)
+createButton("Noclip", 320, onNoclip)
+createButton("Sky Changer", 365, onSkyChanger)
+createButton("Trip Self", 410, onTripSelf)
+createButton("Teleport Forward", 455, onTeleportForward)
+createButton("Teleport Random", 500, onTeleportRandom)
+createButton("Server Hop", 545, onServerHop)
+createButton("Fling Touch", 590, onFlingTouch)
+createButton("Spin Fast", 635, onSpinFast)
+createButton("Really Fast Spin", 680, onReallyFastSpin)
+createButton("Orbit Player", 725, onOrbitPlayer) -- New button
+
+-- Handle Character Respawn
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	
+	-- Reset states on death
+	if flyEnabled then
+		flyEnabled = false
+		onFly()
+		onFly() -- Re-enable fly if it was active
+	end
+	if superSpeedEnabled then
+		humanoid.WalkSpeed = superSpeedEnabled and superSpeedValue or 16
+	end
+	if noclipEnabled then
+		noclipEnabled = false
+		onNoclip()
+		onNoclip() -- Re-enable noclip if it was active
+	end
+	if flingTouchEnabled then
+		flingTouchEnabled = false
+		onFlingTouch()
+		onFlingTouch() -- Re-enable fling touch if it was active
+	end
+	if spinFastEnabled then
+		spinFastEnabled = false
+		onSpinFast()
+		onSpinFast() -- Re-enable spin fast if it was active
+	end
+	if reallyFastSpinEnabled then
+		reallyFastSpinEnabled = false
+		onReallyFastSpin()
+		onReallyFastSpin() -- Re-enable really fast spin if it was active
+	end
+	if orbitEnabled then
+		orbitEnabled = false
+		orbitTarget = nil
+		local orbitButton = frame:FindFirstChild("Orbit Player")
+		if orbitButton then
+			orbitButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+		end
+		RunService:UnbindFromRenderStep("Orbit")
+	end
+end)
